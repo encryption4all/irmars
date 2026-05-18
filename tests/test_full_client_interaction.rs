@@ -1,6 +1,6 @@
 use std::{fs, process::Stdio, time::Duration};
 
-use irma::{
+use irmars::{
     AttributeRequest, CredentialBuilder, DisclosureRequestBuilder, IrmaClient,
     IssuanceRequestBuilder, SessionStatus, SignatureRequestBuilder,
 };
