@@ -51,17 +51,19 @@ jobs:
         with:
           go-version: stable
       - name: Install IRMA server
+        env:
+          IRMAGO_VERSION: v0.19.2
         run: |
           mkdir -p "$RUNNER_TEMP/irma-bin"
           echo "$RUNNER_TEMP/irma-bin" >> "$GITHUB_PATH"
-          curl -fsSL https://github.com/privacybydesign/irmago/releases/download/v0.8.0/irma-master-linux-amd64 \
+          curl -fsSL "https://github.com/privacybydesign/irmago/releases/download/${IRMAGO_VERSION}/irma-linux-amd64" \
             -o "$RUNNER_TEMP/irma-bin/irma"
           chmod +x "$RUNNER_TEMP/irma-bin/irma"
       - name: Set up IRMA configuration
-        # Pass explicit scheme URLs. The binary's compiled-in defaults still
-        # point at privacybydesign.foundation, which now 301-redirects to
-        # schemes.yivi.app but fails TLS validation before the redirect is
-        # followed.
+        # Pass explicit scheme URLs rather than relying on the binary's
+        # compiled-in defaults: irmago < ~v0.13 pointed at the now-defunct
+        # privacybydesign.foundation host, and pinning the URL here keeps
+        # CI independent of any future default-URL drift.
         run: |
           mkdir -p temp_testing/client temp_testing/irma_configuration
           irma scheme download temp_testing/irma_configuration \
