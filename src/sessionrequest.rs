@@ -206,12 +206,12 @@ impl BaseRequestBuilder {
     }
 
     fn return_url(&mut self, return_url: String) {
-        debug_assert!(self.base.return_url == None);
+        debug_assert!(self.base.return_url.is_none());
         self.base.return_url = Some(return_url);
     }
 
     fn augmented_return_url(&mut self, return_url: String) {
-        debug_assert!(self.base.return_url == None);
+        debug_assert!(self.base.return_url.is_none());
         self.base.return_url = Some(return_url);
         self.base.augment_return = true;
     }
@@ -485,7 +485,7 @@ mod tests {
         assert_eq!(
             format!(
                 "{{\"credential\":\"a.b.c\",\"validity\":{},\"attributes\":{{\"d\":\"e\"}}}}",
-                cred2.validity.clone().unwrap()
+                cred2.validity.unwrap()
             ),
             serde_json::to_string(&cred2).unwrap()
         );
