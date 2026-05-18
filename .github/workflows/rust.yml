@@ -58,9 +58,15 @@ jobs:
             -o "$RUNNER_TEMP/irma-bin/irma"
           chmod +x "$RUNNER_TEMP/irma-bin/irma"
       - name: Set up IRMA configuration
+        # Pass explicit scheme URLs. The binary's compiled-in defaults still
+        # point at privacybydesign.foundation, which now 301-redirects to
+        # schemes.yivi.app but fails TLS validation before the redirect is
+        # followed.
         run: |
           mkdir -p temp_testing/client temp_testing/irma_configuration
-          irma scheme download temp_testing/irma_configuration
+          irma scheme download temp_testing/irma_configuration \
+            https://schemes.yivi.app/irma-demo \
+            https://schemes.yivi.app/pbdf
       - name: Build test client emulator
         working-directory: test_tools/client_emulator
         run: go build
