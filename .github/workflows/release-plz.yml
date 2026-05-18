@@ -5,8 +5,12 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
-  # Tag the release commit, create a GitHub release, and publish to crates.io.
+  # Tag the release commit, create a GitHub release, and publish to crates.io
+  # via crates.io trusted publishing (OIDC).
   release-plz-release:
     name: Release-plz release
     runs-on: ubuntu-latest
@@ -14,9 +18,12 @@ jobs:
       contents: write
       pull-requests: read
       id-token: write
+    concurrency:
+      group: release-plz-release-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -37,11 +44,11 @@ jobs:
       contents: write
       pull-requests: write
     concurrency:
-      group: release-plz-${{ github.ref }}
+      group: release-plz-pr-${{ github.ref }}
       cancel-in-progress: false
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
