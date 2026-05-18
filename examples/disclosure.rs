@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use irma::{AttributeRequest, DisclosureRequestBuilder, IrmaClient};
+use irmars::{AttributeRequest, DisclosureRequestBuilder, IrmaClient};
 use tokio::time::sleep;
 
 #[tokio::main]
@@ -37,7 +37,7 @@ async fn main() {
     let result = loop {
         match client.result(&session.token).await {
             Ok(result) => break result,
-            Err(irma::Error::SessionNotFinished(_)) => {}
+            Err(irmars::Error::SessionNotFinished(_)) => {}
             Err(v) => panic!("{}", v),
         }
 

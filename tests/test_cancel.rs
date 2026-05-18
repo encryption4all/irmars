@@ -1,6 +1,6 @@
 use std::process::Stdio;
 
-use irma::{AttributeRequest, DisclosureRequestBuilder, IrmaClient, SessionStatus};
+use irmars::{AttributeRequest, DisclosureRequestBuilder, IrmaClient, SessionStatus};
 use serial_test::serial;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},

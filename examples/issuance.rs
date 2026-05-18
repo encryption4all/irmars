@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use irma::{CredentialBuilder, IrmaClient, IssuanceRequestBuilder};
+use irmars::{CredentialBuilder, IrmaClient, IssuanceRequestBuilder};
 use tokio::time::sleep;
 
 #[tokio::main]
@@ -39,7 +39,7 @@ async fn main() {
     loop {
         match client.result(&session.token).await {
             Ok(_) => break,
-            Err(irma::Error::SessionNotFinished(_)) => {}
+            Err(irmars::Error::SessionNotFinished(_)) => {}
             Err(v) => panic!("{}", v),
         }
 
