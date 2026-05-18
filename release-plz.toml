@@ -1,0 +1,11 @@
+[workspace]
+# Run cargo-semver-checks before publishing to crates.io
+semver_check = true
+# Tag releases as "v<version>" (e.g. v0.3.0)
+git_tag_name = "v{{ version }}"
+# GitHub release name matches the tag
+git_release_name = "v{{ version }}"
+
+[[package]]
+name = "irma"
+publish = true
