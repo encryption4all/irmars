@@ -1,11 +1,15 @@
 [package]
-name = "irma"
+name = "irmars"
 version = "0.2.1"
-authors = ["David Venhoek <david@venhoek.nl>"]
+authors = [
+    "David Venhoek <david@venhoek.nl>",
+    "Ruben Hensen <r.hensen@caesar.nl>",
+]
 edition = "2021"
-repository = "https://github.com/tweedegolf/irmars"
+repository = "https://github.com/encryption4all/irmars"
 license = "Apache-2.0"
-description = "A rust interface for interacting with IRMA servers"
+description = "A rust interface for interacting with IRMA servers (encryption4all fork)"
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
