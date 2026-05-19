@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3](https://github.com/encryption4all/irmars/compare/v0.2.2...v0.2.3) - 2026-05-19
+
+### Other
+
+- bump reqwest to 0.13
+
 ## [0.2.2](https://github.com/encryption4all/irmars/compare/v0.2.1...v0.2.2) - 2026-05-18
 
 ### Other
