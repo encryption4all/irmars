@@ -142,6 +142,20 @@ impl IrmaClient {
             status => Err(Error::SessionNotFinished(status)),
         }
     }
+
+    /// Check whether the irma server is healthy and ready to serve sessions.
+    ///
+    /// Issues `GET {base}/health` (added in irmago v0.15.0) and returns
+    /// `Ok(())` on a 2xx response, or [`Error::NetworkError`] otherwise.
+    /// Useful as a liveness/readiness check before starting a session.
+    pub async fn health(&self) -> Result<(), Error> {
+        self.client
+            .get(self.url.join("health")?)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
 }
 
 /// Builder for IRMA clients
