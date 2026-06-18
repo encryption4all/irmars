@@ -69,6 +69,17 @@ fn test_full_client_interaction() {
                 .await
                 .expect("Failed to start session");
 
+            // Since irmago v0.14.0 the server returns a frontendRequest block
+            // with an authorization token; make sure we surface it.
+            let frontend_request = session
+                .frontend_request
+                .as_ref()
+                .expect("Expected a frontend_request on session start");
+            assert!(
+                !frontend_request.authorization.is_empty(),
+                "frontend_request.authorization should not be empty"
+            );
+
             let status = client
                 .status(&session.token)
                 .await
