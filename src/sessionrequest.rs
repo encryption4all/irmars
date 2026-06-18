@@ -138,6 +138,11 @@ pub struct BaseRequest {
         deserialize_with = "crate::util::de_int_key"
     )]
     pub labels: HashMap<usize, TranslatedString>,
+    /// Credential type identifiers for which the server should accept disclosed
+    /// attributes from already-expired credentials. Matches the `skipExpiryCheck`
+    /// field introduced in irmago v0.14.0. Omitted from the request when `None`.
+    #[serde(rename = "skipExpiryCheck", skip_serializing_if = "Option::is_none")]
+    pub skip_expiry_check: Option<Vec<String>>,
 }
 
 /// IRMA session requests
@@ -179,6 +184,7 @@ impl BaseRequestBuilder {
                 return_url: None,
                 augment_return: false,
                 labels: HashMap::new(),
+                skip_expiry_check: None,
             },
         }
     }
@@ -214,6 +220,10 @@ impl BaseRequestBuilder {
         debug_assert!(self.base.return_url.is_none());
         self.base.return_url = Some(return_url);
         self.base.augment_return = true;
+    }
+
+    fn skip_expiry_check(&mut self, credential_types: Vec<String>) {
+        self.base.skip_expiry_check = Some(credential_types);
     }
 }
 
@@ -276,6 +286,13 @@ impl DisclosureRequestBuilder {
         self.base.augmented_return_url(return_url);
         self
     }
+
+    /// Accept disclosed attributes from already-expired credentials of the given
+    /// credential types (irmago v0.14.0 `skipExpiryCheck`).
+    pub fn skip_expiry_check(mut self, credential_types: Vec<String>) -> DisclosureRequestBuilder {
+        self.base.skip_expiry_check(credential_types);
+        self
+    }
 }
 
 /// Build a signature request
@@ -333,6 +350,13 @@ impl SignatureRequestBuilder {
     /// Set an augmented return url on the request
     pub fn augmented_return_url(mut self, return_url: String) -> SignatureRequestBuilder {
         self.base.augmented_return_url(return_url);
+        self
+    }
+
+    /// Accept disclosed attributes from already-expired credentials of the given
+    /// credential types (irmago v0.14.0 `skipExpiryCheck`).
+    pub fn skip_expiry_check(mut self, credential_types: Vec<String>) -> SignatureRequestBuilder {
+        self.base.skip_expiry_check(credential_types);
         self
     }
 }
@@ -540,6 +564,46 @@ mod tests {
         assert_eq!(
             req4,
             serde_json::from_str(&serde_json::to_string(&req4).unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_skip_expiry_check() {
+        // Omitted entirely when not set.
+        let req1 = DisclosureRequestBuilder::new()
+            .add_discon(vec![vec![AttributeRequest::Simple("a.b.c.d".into())]])
+            .build();
+        assert_eq!(
+            "{\"@context\":\"https://irma.app/ld/request/disclosure/v2\",\"disclose\":[[[\"a.b.c.d\"]]]}",
+            serde_json::to_string(&req1).unwrap()
+        );
+
+        // Serialized as `skipExpiryCheck` on a disclosure request.
+        let req2 = DisclosureRequestBuilder::new()
+            .add_discon(vec![vec![AttributeRequest::Simple("a.b.c.d".into())]])
+            .skip_expiry_check(vec!["a.b.c".into(), "x.y.z".into()])
+            .build();
+        assert_eq!(
+            "{\"@context\":\"https://irma.app/ld/request/disclosure/v2\",\"disclose\":[[[\"a.b.c.d\"]]],\"skipExpiryCheck\":[\"a.b.c\",\"x.y.z\"]}",
+            serde_json::to_string(&req2).unwrap()
+        );
+        assert_eq!(
+            req2,
+            serde_json::from_str(&serde_json::to_string(&req2).unwrap()).unwrap()
+        );
+
+        // Also available on the signature builder (a disclosure request under the hood).
+        let req3 = SignatureRequestBuilder::new("testmessage".into())
+            .add_discon(vec![vec![AttributeRequest::Simple("a.b.c.d".into())]])
+            .skip_expiry_check(vec!["a.b.c".into()])
+            .build();
+        assert_eq!(
+            "{\"@context\":\"https://irma.app/ld/request/signature/v2\",\"message\":\"testmessage\",\"disclose\":[[[\"a.b.c.d\"]]],\"skipExpiryCheck\":[\"a.b.c\"]}",
+            serde_json::to_string(&req3).unwrap()
+        );
+        assert_eq!(
+            req3,
+            serde_json::from_str(&serde_json::to_string(&req3).unwrap()).unwrap()
         );
     }
 
