@@ -36,6 +36,42 @@ pub struct SessionData {
     pub session_ptr: Qr,
     /// The token for further interaction with the session
     pub token: SessionToken,
+    /// Information needed to drive the IRMA/Yivi frontend directly (e.g. for
+    /// pairing). Present since irmago v0.14.0; `None` when the server does not
+    /// return a `frontendRequest` block.
+    #[serde(
+        rename = "frontendRequest",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub frontend_request: Option<FrontendRequest>,
+}
+
+/// The `frontendRequest` block returned by irmago on session start, used to
+/// communicate with the IRMA/Yivi frontend directly.
+///
+/// Since pairing is mandatory by default for IRMA clients (irmago v0.13.0),
+/// the [`authorization`](Self::authorization) token is required to complete the
+/// pairing handshake.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct FrontendRequest {
+    /// Authorization token used to authenticate to the frontend endpoints.
+    pub authorization: String,
+    /// The lowest frontend protocol version the server supports, if reported.
+    #[serde(
+        rename = "minProtocolVersion",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub min_protocol_version: Option<String>,
+    /// The highest frontend protocol version the server supports, if reported.
+    #[serde(
+        rename = "maxProtocolVersion",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_protocol_version: Option<String>,
 }
 
 /// Token used to identify individual sessions on the server
@@ -186,5 +222,86 @@ impl IrmaClientBuilder {
             client: Client::new(),
             authmethod: self.authmethod,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{FrontendRequest, SessionData};
+
+    #[test]
+    fn test_decode_session_data_with_frontend_request() {
+        let data = serde_json::from_str::<SessionData>(
+            r#"
+            {
+                "token": "KzxuWKwL5KGLKr4uerws",
+                "sessionPtr": {
+                    "u": "https://example.com/irma/session/abc",
+                    "irmaqr": "disclosing"
+                },
+                "frontendRequest": {
+                    "authorization": "O5Ld2vAr9pkz7ELzWqgM",
+                    "minProtocolVersion": "1.0",
+                    "maxProtocolVersion": "1.1"
+                }
+            }
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            data.frontend_request,
+            Some(FrontendRequest {
+                authorization: "O5Ld2vAr9pkz7ELzWqgM".into(),
+                min_protocol_version: Some("1.0".into()),
+                max_protocol_version: Some("1.1".into()),
+            })
+        );
+
+        // Round-trips back to JSON without losing the frontend request.
+        let reparsed =
+            serde_json::from_str::<SessionData>(&serde_json::to_string(&data).unwrap()).unwrap();
+        assert_eq!(reparsed.frontend_request, data.frontend_request);
+    }
+
+    #[test]
+    fn test_decode_session_data_without_frontend_request() {
+        // Servers older than irmago v0.14.0 omit the frontendRequest block.
+        let data = serde_json::from_str::<SessionData>(
+            r#"
+            {
+                "token": "KzxuWKwL5KGLKr4uerws",
+                "sessionPtr": {
+                    "u": "https://example.com/irma/session/abc",
+                    "irmaqr": "disclosing"
+                }
+            }
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(data.frontend_request, None);
+
+        // The field is skipped on serialization when absent.
+        let json = serde_json::to_string(&data).unwrap();
+        assert!(!json.contains("frontendRequest"));
+    }
+
+    #[test]
+    fn test_decode_frontend_request_without_protocol_versions() {
+        // Only authorization is guaranteed to be useful; versions are optional.
+        let request = serde_json::from_str::<FrontendRequest>(
+            r#"{ "authorization": "O5Ld2vAr9pkz7ELzWqgM" }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            request,
+            FrontendRequest {
+                authorization: "O5Ld2vAr9pkz7ELzWqgM".into(),
+                min_protocol_version: None,
+                max_protocol_version: None,
+            }
+        );
     }
 }
