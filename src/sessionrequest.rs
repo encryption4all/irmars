@@ -138,6 +138,11 @@ pub struct BaseRequest {
         deserialize_with = "crate::util::de_int_key"
     )]
     pub labels: HashMap<usize, TranslatedString>,
+    /// Host to use in the session QR (`Qr.u`), overriding the IRMA server's default.
+    /// The server validates this against the requestor's configured `host_perms` allowlist.
+    /// Requires irmago v0.14.0 or newer on the server side.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub host: Option<String>,
 }
 
 /// IRMA session requests
@@ -179,6 +184,7 @@ impl BaseRequestBuilder {
                 return_url: None,
                 augment_return: false,
                 labels: HashMap::new(),
+                host: None,
             },
         }
     }
@@ -214,6 +220,11 @@ impl BaseRequestBuilder {
         debug_assert!(self.base.return_url.is_none());
         self.base.return_url = Some(return_url);
         self.base.augment_return = true;
+    }
+
+    fn host(&mut self, host: String) {
+        debug_assert!(self.base.host.is_none());
+        self.base.host = Some(host);
     }
 }
 
@@ -276,6 +287,14 @@ impl DisclosureRequestBuilder {
         self.base.augmented_return_url(return_url);
         self
     }
+
+    /// Set the host to use in the session QR, overriding the IRMA server's default.
+    /// The server validates this against the requestor's configured `host_perms` allowlist
+    /// (requires irmago v0.14.0 or newer).
+    pub fn host(mut self, host: String) -> DisclosureRequestBuilder {
+        self.base.host(host);
+        self
+    }
 }
 
 /// Build a signature request
@@ -333,6 +352,14 @@ impl SignatureRequestBuilder {
     /// Set an augmented return url on the request
     pub fn augmented_return_url(mut self, return_url: String) -> SignatureRequestBuilder {
         self.base.augmented_return_url(return_url);
+        self
+    }
+
+    /// Set the host to use in the session QR, overriding the IRMA server's default.
+    /// The server validates this against the requestor's configured `host_perms` allowlist
+    /// (requires irmago v0.14.0 or newer).
+    pub fn host(mut self, host: String) -> SignatureRequestBuilder {
+        self.base.host(host);
         self
     }
 }
@@ -399,6 +426,14 @@ impl IssuanceRequestBuilder {
     /// Set an augmented return url on the request
     pub fn augmented_return_url(mut self, return_url: String) -> IssuanceRequestBuilder {
         self.base.augmented_return_url(return_url);
+        self
+    }
+
+    /// Set the host to use in the session QR, overriding the IRMA server's default.
+    /// The server validates this against the requestor's configured `host_perms` allowlist
+    /// (requires irmago v0.14.0 or newer).
+    pub fn host(mut self, host: String) -> IssuanceRequestBuilder {
+        self.base.host(host);
         self
     }
 }
@@ -537,6 +572,53 @@ mod tests {
             .augmented_return_url("https://example.com".into())
             .build();
         assert_eq!("{\"@context\":\"https://irma.app/ld/request/disclosure/v2\",\"disclose\":[[[\"a.b.c.d\"]]],\"clientReturnUrl\":\"https://example.com\",\"augmentReturnUrl\":true}", serde_json::to_string(&req4).unwrap());
+        assert_eq!(
+            req4,
+            serde_json::from_str(&serde_json::to_string(&req4).unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_host_request() {
+        // host is omitted from the serialized request when not set
+        let req1 = DisclosureRequestBuilder::new()
+            .add_discon(vec![vec![AttributeRequest::Simple("a.b.c.d".into())]])
+            .build();
+        assert!(!serde_json::to_string(&req1).unwrap().contains("host"));
+
+        // host is serialized as "host" when set, and survives a round-trip
+        let req2 = DisclosureRequestBuilder::new()
+            .add_discon(vec![vec![AttributeRequest::Simple("a.b.c.d".into())]])
+            .host("https://example.com".into())
+            .build();
+        assert_eq!("{\"@context\":\"https://irma.app/ld/request/disclosure/v2\",\"disclose\":[[[\"a.b.c.d\"]]],\"host\":\"https://example.com\"}", serde_json::to_string(&req2).unwrap());
+        assert_eq!(
+            req2,
+            serde_json::from_str(&serde_json::to_string(&req2).unwrap()).unwrap()
+        );
+
+        // the host setter is available on every public builder
+        let req3 = SignatureRequestBuilder::new("testmessage".into())
+            .add_discon(vec![vec![AttributeRequest::Simple("a.b.c.d".into())]])
+            .host("https://signature.example.com".into())
+            .build();
+        assert_eq!("{\"@context\":\"https://irma.app/ld/request/signature/v2\",\"message\":\"testmessage\",\"disclose\":[[[\"a.b.c.d\"]]],\"host\":\"https://signature.example.com\"}", serde_json::to_string(&req3).unwrap());
+        assert_eq!(
+            req3,
+            serde_json::from_str(&serde_json::to_string(&req3).unwrap()).unwrap()
+        );
+
+        let req4 = IssuanceRequestBuilder::new()
+            .add_credential(Credential {
+                credential: "a.b.c".into(),
+                validity: Some(123456789),
+                attributes: hashmap![
+                    "d".into() => "e".into(),
+                ],
+            })
+            .host("https://issuance.example.com".into())
+            .build();
+        assert_eq!("{\"@context\":\"https://irma.app/ld/request/issuance/v2\",\"credentials\":[{\"credential\":\"a.b.c\",\"validity\":123456789,\"attributes\":{\"d\":\"e\"}}],\"host\":\"https://issuance.example.com\"}", serde_json::to_string(&req4).unwrap());
         assert_eq!(
             req4,
             serde_json::from_str(&serde_json::to_string(&req4).unwrap()).unwrap()
