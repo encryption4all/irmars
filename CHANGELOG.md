@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/encryption4all/irmars/compare/v0.2.2...v0.3.0) - 2026-06-26
+
+### Added
+
+- support chained sessions (nextSession) on ExtendedIrmaRequest
+- add host option to override session QR host
+- expose frontendRequest block on SessionData
+- add IrmaClient::health() wrapper for the /health endpoint
+
+### Other
+
+- bump reqwest to 0.13
+
 ## [0.2.2](https://github.com/encryption4all/irmars/compare/v0.2.1...v0.2.2) - 2026-05-18
 
 ### Other
