@@ -438,6 +438,24 @@ impl IssuanceRequestBuilder {
     }
 }
 
+/// Data describing a chained ("next") session to start after the current one
+/// succeeds. Mirrors the `NextSessionData` struct on irmago's `RequestorBaseRequest`
+/// (introduced in irmago v0.10.0); as of irmago v0.19.2 it carries a single `url`
+/// field. See <https://irma.app/docs/chained-sessions>.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct NextSessionData {
+    /// URL from which to get the next session request once this session succeeds.
+    pub url: String,
+}
+
+impl NextSessionData {
+    /// Create the data for a chained session pointing at the given requestor URL.
+    pub fn new(url: String) -> NextSessionData {
+        NextSessionData { url }
+    }
+}
+
 /// An IRMA request extended with extra information for the server on how to execute it.
 /// (Note: this interface is unstable, and might change significantly in the future)
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -452,8 +470,36 @@ pub struct ExtendedIrmaRequest {
     /// URL on which to recieve updates as the session status changes
     #[serde(rename = "callbackUrl", skip_serializing_if = "Option::is_none")]
     pub callback_url: Option<String>,
+    /// A chained session to start once this session succeeds. Serialized as
+    /// `nextSession` to match irmago's `RequestorBaseRequest` and omitted when `None`.
+    /// Recommended only with irmago server v0.19.0 or newer (see GHSA-pv8v-c99h-c5q4).
+    #[serde(rename = "nextSession", skip_serializing_if = "Option::is_none")]
+    pub next_session: Option<NextSessionData>,
     /// Inner request
     pub request: IrmaRequest,
+}
+
+impl ExtendedIrmaRequest {
+    /// Wrap an inner request without any extra server instructions.
+    pub fn new(request: IrmaRequest) -> ExtendedIrmaRequest {
+        ExtendedIrmaRequest {
+            validity: None,
+            timeout: None,
+            callback_url: None,
+            next_session: None,
+            request,
+        }
+    }
+
+    /// Chain a follow-up session to be started by the server immediately after this
+    /// one succeeds, pointing at the given requestor URL (irmago `nextSession`).
+    ///
+    /// For production use this requires an irmago server of at least v0.19.0, which
+    /// ships the tightened next-session permission handling from GHSA-pv8v-c99h-c5q4.
+    pub fn next_session(mut self, url: String) -> ExtendedIrmaRequest {
+        self.next_session = Some(NextSessionData::new(url));
+        self
+    }
 }
 
 #[cfg(test)]
@@ -465,8 +511,8 @@ mod tests {
     use crate::CredentialBuilder;
 
     use super::{
-        AttributeRequest, Credential, DisclosureRequestBuilder, IssuanceRequestBuilder,
-        SignatureRequestBuilder, TranslatedString,
+        AttributeRequest, Credential, DisclosureRequestBuilder, ExtendedIrmaRequest,
+        IssuanceRequestBuilder, NextSessionData, SignatureRequestBuilder, TranslatedString,
     };
 
     #[test]
@@ -772,6 +818,39 @@ mod tests {
         assert_eq!(
             req6,
             serde_json::from_str(&serde_json::to_string(&req6).unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_next_session() {
+        let inner = DisclosureRequestBuilder::new()
+            .add_discon(vec![vec![AttributeRequest::Simple("a.b.c.d".into())]])
+            .build();
+
+        // Omitted entirely when not set.
+        let req1 = ExtendedIrmaRequest::new(inner.clone());
+        assert_eq!(
+            "{\"request\":{\"@context\":\"https://irma.app/ld/request/disclosure/v2\",\"disclose\":[[[\"a.b.c.d\"]]]}}",
+            serde_json::to_string(&req1).unwrap()
+        );
+        assert_eq!(
+            req1,
+            serde_json::from_str(&serde_json::to_string(&req1).unwrap()).unwrap()
+        );
+
+        // Serialized as `nextSession` with a single `url` sub-field, matching irmago.
+        let req2 = ExtendedIrmaRequest::new(inner).next_session("https://example.com/next".into());
+        assert_eq!(
+            "{\"nextSession\":{\"url\":\"https://example.com/next\"},\"request\":{\"@context\":\"https://irma.app/ld/request/disclosure/v2\",\"disclose\":[[[\"a.b.c.d\"]]]}}",
+            serde_json::to_string(&req2).unwrap()
+        );
+        assert_eq!(
+            req2.next_session,
+            Some(NextSessionData::new("https://example.com/next".into()))
+        );
+        assert_eq!(
+            req2,
+            serde_json::from_str(&serde_json::to_string(&req2).unwrap()).unwrap()
         );
     }
 }
