@@ -9,9 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- validate session tokens against `^[A-Za-z0-9_-]+$` before interpolating them
-  into URL path segments in `status`, `cancel`, and `result`, preventing a
-  path-traversal via crafted tokens (GHSA-rjfw-pvxw-2prx)
+- validate the format of session tokens before using them in server requests
 
 ## [0.2.2](https://github.com/encryption4all/irmars/compare/v0.2.1...v0.2.2) - 2026-05-18
 
