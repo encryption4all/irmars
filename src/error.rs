@@ -13,4 +13,6 @@ pub enum Error {
     SessionTimedOut,
     #[error("Irma session not finished")]
     SessionNotFinished(super::sessionresult::SessionStatus),
+    #[error("Invalid session token: only [A-Za-z0-9_-] characters are allowed")]
+    InvalidToken,
 }
