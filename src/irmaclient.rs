@@ -4,8 +4,8 @@ use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    sessionrequest::ExtendedIrmaRequest, Error, IrmaRequest, SessionResult, SessionStatus,
-    SessionType,
+    sessionrequest::ExtendedIrmaRequest, Error, IrmaRequest, ProofStatus, SessionResult,
+    SessionStatus, SessionType,
 };
 
 #[derive(Clone, Debug)]
@@ -161,7 +161,15 @@ impl IrmaClient {
         Ok(())
     }
 
-    /// Get the result for a previously started irma session
+    /// Get the result for a previously started irma session.
+    ///
+    /// For disclosure and signing sessions a successful (`Ok`) return
+    /// guarantees the proof was cryptographically verified by the server
+    /// (`proofStatus == VALID`); a completed session whose proof did not verify
+    /// yields [`Error::ProofNotValid`]. Issuance sessions carry no proof to
+    /// disclose and are therefore gated on completion only. This means callers
+    /// can trust [`SessionResult::disclosed`] as soon as `result` returns `Ok`
+    /// for a disclosure/signing session.
     pub async fn result(&self, token: &SessionToken) -> Result<SessionResult, Error> {
         let result = self
             .client
@@ -171,12 +179,7 @@ impl IrmaClient {
             .error_for_status()?
             .json::<SessionResult>()
             .await?;
-        match result.status {
-            SessionStatus::Done => Ok(result),
-            SessionStatus::Cancelled => Err(Error::SessionCancelled),
-            SessionStatus::Timeout => Err(Error::SessionTimedOut),
-            status => Err(Error::SessionNotFinished(status)),
-        }
+        validate_result(result)
     }
 
     /// Check whether the irma server is healthy and ready to serve sessions.
@@ -191,6 +194,28 @@ impl IrmaClient {
             .await?
             .error_for_status()?;
         Ok(())
+    }
+}
+
+/// Map a fetched [`SessionResult`] onto a `Result`, enforcing that disclosure
+/// and signing sessions only succeed when their proof verified.
+///
+/// A `Done` disclosure/signing session is only accepted when
+/// `proof_status == Some(ProofStatus::Valid)`; any other proof status (or a
+/// missing one) is rejected with [`Error::ProofNotValid`]. Issuance sessions
+/// produce no disclosure proof and are accepted on completion alone.
+fn validate_result(result: SessionResult) -> Result<SessionResult, Error> {
+    match result.status {
+        SessionStatus::Done => match result.sessiontype {
+            SessionType::Disclosing | SessionType::Signing => match result.proof_status {
+                Some(ProofStatus::Valid) => Ok(result),
+                other => Err(Error::ProofNotValid(other)),
+            },
+            SessionType::Issuing => Ok(result),
+        },
+        SessionStatus::Cancelled => Err(Error::SessionCancelled),
+        SessionStatus::Timeout => Err(Error::SessionTimedOut),
+        status => Err(Error::SessionNotFinished(status)),
     }
 }
 
@@ -227,7 +252,102 @@ impl IrmaClientBuilder {
 
 #[cfg(test)]
 mod tests {
-    use crate::{FrontendRequest, SessionData};
+    use super::validate_result;
+    use crate::{
+        Error, FrontendRequest, ProofStatus, SessionData, SessionResult, SessionStatus,
+        SessionToken, SessionType,
+    };
+
+    fn result_with(
+        sessiontype: SessionType,
+        status: SessionStatus,
+        proof_status: Option<ProofStatus>,
+    ) -> SessionResult {
+        SessionResult {
+            token: SessionToken("token".into()),
+            sessiontype,
+            status,
+            proof_status,
+            disclosed: vec![],
+            signature: None,
+        }
+    }
+
+    #[test]
+    fn valid_disclosure_proof_is_accepted() {
+        for sessiontype in [SessionType::Disclosing, SessionType::Signing] {
+            let result = result_with(sessiontype, SessionStatus::Done, Some(ProofStatus::Valid));
+            assert_eq!(validate_result(result.clone()).unwrap(), result);
+        }
+    }
+
+    #[test]
+    fn non_valid_proof_on_finished_disclosure_is_rejected() {
+        // A DONE session whose proof did not verify must not surface as Ok.
+        for proof_status in [
+            ProofStatus::Invalid,
+            ProofStatus::InvalidTimestamp,
+            ProofStatus::UnmatchedRequest,
+            ProofStatus::MissingAttributes,
+            ProofStatus::Expired,
+        ] {
+            for sessiontype in [SessionType::Disclosing, SessionType::Signing] {
+                let result =
+                    result_with(sessiontype, SessionStatus::Done, Some(proof_status.clone()));
+                assert!(matches!(
+                    validate_result(result),
+                    Err(Error::ProofNotValid(Some(ref s))) if *s == proof_status
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn missing_proof_status_on_finished_disclosure_is_rejected() {
+        let result = result_with(SessionType::Disclosing, SessionStatus::Done, None);
+        assert!(matches!(
+            validate_result(result),
+            Err(Error::ProofNotValid(None))
+        ));
+    }
+
+    #[test]
+    fn issuance_is_gated_on_completion_only() {
+        // Issuance carries no disclosure proof, so a DONE status is enough,
+        // regardless of proof_status.
+        for proof_status in [None, Some(ProofStatus::Valid)] {
+            let result = result_with(SessionType::Issuing, SessionStatus::Done, proof_status);
+            assert_eq!(validate_result(result.clone()).unwrap(), result);
+        }
+    }
+
+    #[test]
+    fn unfinished_and_aborted_sessions_map_to_their_errors() {
+        assert!(matches!(
+            validate_result(result_with(
+                SessionType::Disclosing,
+                SessionStatus::Cancelled,
+                None
+            )),
+            Err(Error::SessionCancelled)
+        ));
+        assert!(matches!(
+            validate_result(result_with(
+                SessionType::Disclosing,
+                SessionStatus::Timeout,
+                None
+            )),
+            Err(Error::SessionTimedOut)
+        ));
+        assert!(matches!(
+            validate_result(result_with(
+                SessionType::Disclosing,
+                SessionStatus::Connected,
+                None
+            )),
+            Err(Error::SessionNotFinished(SessionStatus::Connected))
+        ));
+    }
 
     #[test]
     fn test_decode_session_data_with_frontend_request() {
