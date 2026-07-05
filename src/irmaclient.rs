@@ -84,9 +84,8 @@ impl SessionToken {
     /// tokens actually use (`^[A-Za-z0-9_-]+$`).
     ///
     /// The token value comes back from the server and is interpolated into URL
-    /// path segments. Without this check, a token containing relative path
-    /// sequences (e.g. `../`) would let [`Url::join`] resolve requests to
-    /// unintended paths on the same host (path traversal, GHSA-rjfw-pvxw-2prx).
+    /// path segments, so it is validated to a strict format before use to keep
+    /// [`Url::join`] from resolving requests to unintended paths.
     fn validate(&self) -> Result<&str, Error> {
         if !self.0.is_empty()
             && self
