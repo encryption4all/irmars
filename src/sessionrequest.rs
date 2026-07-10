@@ -143,6 +143,11 @@ pub struct BaseRequest {
     /// field introduced in irmago v0.14.0. Omitted from the request when `None`.
     #[serde(rename = "skipExpiryCheck", skip_serializing_if = "Option::is_none")]
     pub skip_expiry_check: Option<Vec<String>>,
+    /// Host to use in the session QR (`Qr.u`), overriding the IRMA server's default.
+    /// The server validates this against the requestor's configured `host_perms` allowlist.
+    /// Requires irmago v0.14.0 or newer on the server side.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub host: Option<String>,
 }
 
 /// IRMA session requests
@@ -185,6 +190,7 @@ impl BaseRequestBuilder {
                 augment_return: false,
                 labels: HashMap::new(),
                 skip_expiry_check: None,
+                host: None,
             },
         }
     }
@@ -224,6 +230,11 @@ impl BaseRequestBuilder {
 
     fn skip_expiry_check(&mut self, credential_types: Vec<String>) {
         self.base.skip_expiry_check = Some(credential_types);
+    }
+
+    fn host(&mut self, host: String) {
+        debug_assert!(self.base.host.is_none());
+        self.base.host = Some(host);
     }
 }
 
@@ -293,6 +304,14 @@ impl DisclosureRequestBuilder {
         self.base.skip_expiry_check(credential_types);
         self
     }
+
+    /// Set the host to use in the session QR, overriding the IRMA server's default.
+    /// The server validates this against the requestor's configured `host_perms` allowlist
+    /// (requires irmago v0.14.0 or newer).
+    pub fn host(mut self, host: String) -> DisclosureRequestBuilder {
+        self.base.host(host);
+        self
+    }
 }
 
 /// Build a signature request
@@ -357,6 +376,14 @@ impl SignatureRequestBuilder {
     /// credential types (irmago v0.14.0 `skipExpiryCheck`).
     pub fn skip_expiry_check(mut self, credential_types: Vec<String>) -> SignatureRequestBuilder {
         self.base.skip_expiry_check(credential_types);
+        self
+    }
+
+    /// Set the host to use in the session QR, overriding the IRMA server's default.
+    /// The server validates this against the requestor's configured `host_perms` allowlist
+    /// (requires irmago v0.14.0 or newer).
+    pub fn host(mut self, host: String) -> SignatureRequestBuilder {
+        self.base.host(host);
         self
     }
 }
@@ -425,6 +452,32 @@ impl IssuanceRequestBuilder {
         self.base.augmented_return_url(return_url);
         self
     }
+
+    /// Set the host to use in the session QR, overriding the IRMA server's default.
+    /// The server validates this against the requestor's configured `host_perms` allowlist
+    /// (requires irmago v0.14.0 or newer).
+    pub fn host(mut self, host: String) -> IssuanceRequestBuilder {
+        self.base.host(host);
+        self
+    }
+}
+
+/// Data describing a chained ("next") session to start after the current one
+/// succeeds. Mirrors the `NextSessionData` struct on irmago's `RequestorBaseRequest`
+/// (introduced in irmago v0.10.0); as of irmago v0.19.2 it carries a single `url`
+/// field. See <https://irma.app/docs/chained-sessions>.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct NextSessionData {
+    /// URL from which to get the next session request once this session succeeds.
+    pub url: String,
+}
+
+impl NextSessionData {
+    /// Create the data for a chained session pointing at the given requestor URL.
+    pub fn new(url: String) -> NextSessionData {
+        NextSessionData { url }
+    }
 }
 
 /// An IRMA request extended with extra information for the server on how to execute it.
@@ -441,8 +494,36 @@ pub struct ExtendedIrmaRequest {
     /// URL on which to recieve updates as the session status changes
     #[serde(rename = "callbackUrl", skip_serializing_if = "Option::is_none")]
     pub callback_url: Option<String>,
+    /// A chained session to start once this session succeeds. Serialized as
+    /// `nextSession` to match irmago's `RequestorBaseRequest` and omitted when `None`.
+    /// Recommended only with irmago server v0.19.0 or newer (see GHSA-pv8v-c99h-c5q4).
+    #[serde(rename = "nextSession", skip_serializing_if = "Option::is_none")]
+    pub next_session: Option<NextSessionData>,
     /// Inner request
     pub request: IrmaRequest,
+}
+
+impl ExtendedIrmaRequest {
+    /// Wrap an inner request without any extra server instructions.
+    pub fn new(request: IrmaRequest) -> ExtendedIrmaRequest {
+        ExtendedIrmaRequest {
+            validity: None,
+            timeout: None,
+            callback_url: None,
+            next_session: None,
+            request,
+        }
+    }
+
+    /// Chain a follow-up session to be started by the server immediately after this
+    /// one succeeds, pointing at the given requestor URL (irmago `nextSession`).
+    ///
+    /// For production use this requires an irmago server of at least v0.19.0, which
+    /// ships the tightened next-session permission handling from GHSA-pv8v-c99h-c5q4.
+    pub fn next_session(mut self, url: String) -> ExtendedIrmaRequest {
+        self.next_session = Some(NextSessionData::new(url));
+        self
+    }
 }
 
 #[cfg(test)]
@@ -454,8 +535,8 @@ mod tests {
     use crate::CredentialBuilder;
 
     use super::{
-        AttributeRequest, Credential, DisclosureRequestBuilder, IssuanceRequestBuilder,
-        SignatureRequestBuilder, TranslatedString,
+        AttributeRequest, Credential, DisclosureRequestBuilder, ExtendedIrmaRequest,
+        IssuanceRequestBuilder, NextSessionData, SignatureRequestBuilder, TranslatedString,
     };
 
     #[test]
@@ -608,6 +689,53 @@ mod tests {
     }
 
     #[test]
+    fn test_host_request() {
+        // host is omitted from the serialized request when not set
+        let req1 = DisclosureRequestBuilder::new()
+            .add_discon(vec![vec![AttributeRequest::Simple("a.b.c.d".into())]])
+            .build();
+        assert!(!serde_json::to_string(&req1).unwrap().contains("host"));
+
+        // host is serialized as "host" when set, and survives a round-trip
+        let req2 = DisclosureRequestBuilder::new()
+            .add_discon(vec![vec![AttributeRequest::Simple("a.b.c.d".into())]])
+            .host("https://example.com".into())
+            .build();
+        assert_eq!("{\"@context\":\"https://irma.app/ld/request/disclosure/v2\",\"disclose\":[[[\"a.b.c.d\"]]],\"host\":\"https://example.com\"}", serde_json::to_string(&req2).unwrap());
+        assert_eq!(
+            req2,
+            serde_json::from_str(&serde_json::to_string(&req2).unwrap()).unwrap()
+        );
+
+        // the host setter is available on every public builder
+        let req3 = SignatureRequestBuilder::new("testmessage".into())
+            .add_discon(vec![vec![AttributeRequest::Simple("a.b.c.d".into())]])
+            .host("https://signature.example.com".into())
+            .build();
+        assert_eq!("{\"@context\":\"https://irma.app/ld/request/signature/v2\",\"message\":\"testmessage\",\"disclose\":[[[\"a.b.c.d\"]]],\"host\":\"https://signature.example.com\"}", serde_json::to_string(&req3).unwrap());
+        assert_eq!(
+            req3,
+            serde_json::from_str(&serde_json::to_string(&req3).unwrap()).unwrap()
+        );
+
+        let req4 = IssuanceRequestBuilder::new()
+            .add_credential(Credential {
+                credential: "a.b.c".into(),
+                validity: Some(123456789),
+                attributes: hashmap![
+                    "d".into() => "e".into(),
+                ],
+            })
+            .host("https://issuance.example.com".into())
+            .build();
+        assert_eq!("{\"@context\":\"https://irma.app/ld/request/issuance/v2\",\"credentials\":[{\"credential\":\"a.b.c\",\"validity\":123456789,\"attributes\":{\"d\":\"e\"}}],\"host\":\"https://issuance.example.com\"}", serde_json::to_string(&req4).unwrap());
+        assert_eq!(
+            req4,
+            serde_json::from_str(&serde_json::to_string(&req4).unwrap()).unwrap()
+        );
+    }
+
+    #[test]
     fn test_signature_request() {
         let req1 = SignatureRequestBuilder::new("testmessage".into())
             .add_discon(vec![vec![AttributeRequest::Simple("a.b.c.d".into())]])
@@ -754,6 +882,39 @@ mod tests {
         assert_eq!(
             req6,
             serde_json::from_str(&serde_json::to_string(&req6).unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_next_session() {
+        let inner = DisclosureRequestBuilder::new()
+            .add_discon(vec![vec![AttributeRequest::Simple("a.b.c.d".into())]])
+            .build();
+
+        // Omitted entirely when not set.
+        let req1 = ExtendedIrmaRequest::new(inner.clone());
+        assert_eq!(
+            "{\"request\":{\"@context\":\"https://irma.app/ld/request/disclosure/v2\",\"disclose\":[[[\"a.b.c.d\"]]]}}",
+            serde_json::to_string(&req1).unwrap()
+        );
+        assert_eq!(
+            req1,
+            serde_json::from_str(&serde_json::to_string(&req1).unwrap()).unwrap()
+        );
+
+        // Serialized as `nextSession` with a single `url` sub-field, matching irmago.
+        let req2 = ExtendedIrmaRequest::new(inner).next_session("https://example.com/next".into());
+        assert_eq!(
+            "{\"nextSession\":{\"url\":\"https://example.com/next\"},\"request\":{\"@context\":\"https://irma.app/ld/request/disclosure/v2\",\"disclose\":[[[\"a.b.c.d\"]]]}}",
+            serde_json::to_string(&req2).unwrap()
+        );
+        assert_eq!(
+            req2.next_session,
+            Some(NextSessionData::new("https://example.com/next".into()))
+        );
+        assert_eq!(
+            req2,
+            serde_json::from_str(&serde_json::to_string(&req2).unwrap()).unwrap()
         );
     }
 }

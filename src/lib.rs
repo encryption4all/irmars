@@ -5,10 +5,13 @@ mod sessionresult;
 mod util;
 
 pub use error::Error;
-pub use irmaclient::{IrmaClient, IrmaClientBuilder, Qr, SessionData, SessionToken};
+pub use irmaclient::{
+    FrontendRequest, IrmaClient, IrmaClientBuilder, Qr, SessionData, SessionToken,
+};
 pub use sessionrequest::{
     AttributeRequest, ConDisCon, Credential, CredentialBuilder, DisclosureRequestBuilder,
-    ExtendedIrmaRequest, IrmaRequest, IssuanceRequestBuilder, SignatureRequestBuilder,
+    ExtendedIrmaRequest, IrmaRequest, IssuanceRequestBuilder, NextSessionData,
+    SignatureRequestBuilder,
 };
 pub use sessionresult::{
     AttributeStatus, DisclosedAttribute, ProofStatus, SessionResult, SessionStatus, SessionType,
