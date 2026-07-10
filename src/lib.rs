@@ -9,12 +9,15 @@
 //! [`SessionResult::disclosed`] on the basis of session completion alone.
 //!
 //! To make the safe path the default, [`IrmaClient::result`] only returns `Ok`
-//! for a disclosure or signing session when the proof verified
+//! when any disclosure proof carried by the session verified
 //! (`proofStatus == VALID`); any other outcome is reported as
-//! [`Error::ProofNotValid`]. A bare `Ok(_)` from `result` on such a session
-//! thus guarantees a verified proof, and its `disclosed` attributes can be
-//! trusted. Issuance sessions carry no disclosure proof and are gated on
-//! completion only.
+//! [`Error::ProofNotValid`]. This applies to disclosure and signing sessions,
+//! and equally to combined issuance+disclosure sessions (an issuance built with
+//! [`IssuanceRequestBuilder::add_discon`], which the server reports as
+//! `type=issuing` alongside a disclosure proof). A bare `Ok(_)` from `result`
+//! thus guarantees any disclosed attributes come from a verified proof. A plain
+//! issuance session carries no disclosure proof and is gated on completion
+//! only.
 //!
 //! When inspecting a [`SessionResult`] obtained by other means, check the proof
 //! explicitly before trusting `disclosed`:

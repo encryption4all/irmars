@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use irmars::{AttributeRequest, IrmaClient, ProofStatus, SignatureRequestBuilder};
+use irmars::{AttributeRequest, IrmaClient, SignatureRequestBuilder};
 use tokio::time::sleep;
 
 #[tokio::main]
@@ -44,10 +44,7 @@ async fn main() {
         sleep(Duration::from_secs(2)).await;
     };
 
-    // Only trust the disclosed attributes once the proof has verified.
-    if !matches!(result.proof_status, Some(ProofStatus::Valid)) {
-        panic!("Proof did not verify: {:?}", result.proof_status);
-    }
-
+    // `client.result` only returns `Ok` once the signature proof has verified,
+    // so the disclosed attributes below can be trusted directly.
     println!("Session result: {:?}", result);
 }

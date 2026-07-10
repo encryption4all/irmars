@@ -186,13 +186,18 @@ impl IrmaClient {
 
     /// Get the result for a previously started irma session.
     ///
-    /// For disclosure and signing sessions a successful (`Ok`) return
-    /// guarantees the proof was cryptographically verified by the server
-    /// (`proofStatus == VALID`); a completed session whose proof did not verify
-    /// yields [`Error::ProofNotValid`]. Issuance sessions carry no proof to
-    /// disclose and are therefore gated on completion only. This means callers
-    /// can trust [`SessionResult::disclosed`] as soon as `result` returns `Ok`
-    /// for a disclosure/signing session.
+    /// Whenever a session carries a disclosure proof, a successful (`Ok`)
+    /// return guarantees that proof was cryptographically verified by the
+    /// server (`proofStatus == VALID`); a completed session whose proof did not
+    /// verify yields [`Error::ProofNotValid`]. This covers disclosure and
+    /// signing sessions as well as combined issuance+disclosure sessions (an
+    /// issuance built with [`IssuanceRequestBuilder::add_discon`], which the
+    /// server reports as `type=issuing` alongside a disclosure proof). A plain
+    /// issuance session carries no proof to disclose and is therefore gated on
+    /// completion only. This means callers can trust
+    /// [`SessionResult::disclosed`] as soon as `result` returns `Ok`.
+    ///
+    /// [`IssuanceRequestBuilder::add_discon`]: crate::IssuanceRequestBuilder::add_discon
     pub async fn result(&self, token: &SessionToken) -> Result<SessionResult, Error> {
         let token = token.validate()?;
         let result = self
@@ -221,25 +226,47 @@ impl IrmaClient {
     }
 }
 
-/// Map a fetched [`SessionResult`] onto a `Result`, enforcing that disclosure
-/// and signing sessions only succeed when their proof verified.
+/// Map a fetched [`SessionResult`] onto a `Result`, enforcing that any
+/// disclosure proof carried by the session verified before it is accepted.
 ///
 /// A `Done` disclosure/signing session is only accepted when
 /// `proof_status == Some(ProofStatus::Valid)`; any other proof status (or a
 /// missing one) is rejected with [`Error::ProofNotValid`]. Issuance sessions
-/// produce no disclosure proof and are accepted on completion alone.
+/// may embed a disclosure component (combined issuance+disclosure, see
+/// [`IssuanceRequestBuilder::add_discon`]); when one is present the same proof
+/// check applies, otherwise a plain issuance is accepted on completion alone.
+///
+/// [`IssuanceRequestBuilder::add_discon`]: crate::IssuanceRequestBuilder::add_discon
 fn validate_result(result: SessionResult) -> Result<SessionResult, Error> {
     match result.status {
         SessionStatus::Done => match result.sessiontype {
-            SessionType::Disclosing | SessionType::Signing => match result.proof_status {
-                Some(ProofStatus::Valid) => Ok(result),
-                other => Err(Error::ProofNotValid(other)),
-            },
-            SessionType::Issuing => Ok(result),
+            SessionType::Disclosing | SessionType::Signing => enforce_proof_valid(result),
+            // A plain issuance session carries no disclosure proof, but a
+            // combined issuance+disclosure session reports `type=issuing`
+            // alongside a disclosure proof. When such a component is present
+            // (a proof status was returned, or attributes were disclosed) its
+            // proof must have verified — otherwise disclosed attributes would
+            // be trusted from an invalid/expired/unmatched proof.
+            SessionType::Issuing => {
+                if result.proof_status.is_some() || !result.disclosed.is_empty() {
+                    enforce_proof_valid(result)
+                } else {
+                    Ok(result)
+                }
+            }
         },
         SessionStatus::Cancelled => Err(Error::SessionCancelled),
         SessionStatus::Timeout => Err(Error::SessionTimedOut),
         status => Err(Error::SessionNotFinished(status)),
+    }
+}
+
+/// Accept a completed session only when its disclosure proof verified,
+/// rejecting any other (or missing) proof status with [`Error::ProofNotValid`].
+fn enforce_proof_valid(result: SessionResult) -> Result<SessionResult, Error> {
+    match result.proof_status {
+        Some(ProofStatus::Valid) => Ok(result),
+        other => Err(Error::ProofNotValid(other)),
     }
 }
 
@@ -278,9 +305,18 @@ impl IrmaClientBuilder {
 mod tests {
     use super::validate_result;
     use crate::{
-        Error, FrontendRequest, ProofStatus, SessionData, SessionResult, SessionStatus,
-        SessionToken, SessionType,
+        AttributeStatus, DisclosedAttribute, Error, FrontendRequest, ProofStatus, SessionData,
+        SessionResult, SessionStatus, SessionToken, SessionType,
     };
+
+    fn disclosed_attr() -> DisclosedAttribute {
+        DisclosedAttribute {
+            raw_value: Some("yes".into()),
+            value: None,
+            identifier: "irma-demo.MijnOverheid.ageLower.over18".into(),
+            status: AttributeStatus::Present,
+        }
+    }
 
     fn result_with(
         sessiontype: SessionType,
@@ -350,13 +386,62 @@ mod tests {
     }
 
     #[test]
-    fn issuance_is_gated_on_completion_only() {
-        // Issuance carries no disclosure proof, so a DONE status is enough,
-        // regardless of proof_status.
+    fn plain_issuance_is_gated_on_completion_only() {
+        // A plain issuance carries no disclosure proof (no proof status, no
+        // disclosed attributes), so a DONE status is enough.
         for proof_status in [None, Some(ProofStatus::Valid)] {
             let result = result_with(SessionType::Issuing, SessionStatus::Done, proof_status);
             assert_eq!(validate_result(result.clone()).unwrap(), result);
         }
+    }
+
+    #[test]
+    fn combined_issuance_disclosure_requires_valid_proof() {
+        // A combined issuance+disclosure session (IssuanceRequestBuilder::add_discon)
+        // is reported as `type=issuing` but still carries a disclosure proof;
+        // disclosed attributes must not surface as Ok unless that proof verified.
+        for proof_status in [
+            ProofStatus::Invalid,
+            ProofStatus::InvalidTimestamp,
+            ProofStatus::UnmatchedRequest,
+            ProofStatus::MissingAttributes,
+            ProofStatus::Expired,
+        ] {
+            let mut result = result_with(
+                SessionType::Issuing,
+                SessionStatus::Done,
+                Some(proof_status.clone()),
+            );
+            result.disclosed = vec![vec![disclosed_attr()]];
+            assert!(
+                matches!(
+                    validate_result(result),
+                    Err(Error::ProofNotValid(Some(ref s))) if *s == proof_status
+                ),
+                "combined issuance with {proof_status:?} proof must be rejected"
+            );
+        }
+
+        // The valid case still succeeds.
+        let mut result = result_with(
+            SessionType::Issuing,
+            SessionStatus::Done,
+            Some(ProofStatus::Valid),
+        );
+        result.disclosed = vec![vec![disclosed_attr()]];
+        assert_eq!(validate_result(result.clone()).unwrap(), result);
+    }
+
+    #[test]
+    fn combined_issuance_with_disclosed_but_no_proof_status_is_rejected() {
+        // Disclosed attributes present but no proof status returned: the
+        // disclosure proof cannot be considered verified, so reject.
+        let mut result = result_with(SessionType::Issuing, SessionStatus::Done, None);
+        result.disclosed = vec![vec![disclosed_attr()]];
+        assert!(matches!(
+            validate_result(result),
+            Err(Error::ProofNotValid(None))
+        ));
     }
 
     #[test]
