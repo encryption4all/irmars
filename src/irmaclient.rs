@@ -79,6 +79,27 @@ pub struct FrontendRequest {
 #[cfg_attr(test, derive(PartialEq))]
 pub struct SessionToken(pub String);
 
+impl SessionToken {
+    /// Validate that the token only contains the characters IRMA/Yivi session
+    /// tokens actually use (`^[A-Za-z0-9_-]+$`).
+    ///
+    /// The token value comes back from the server and is interpolated into URL
+    /// path segments, so it is validated to a strict format before use to keep
+    /// [`Url::join`] from resolving requests to unintended paths.
+    fn validate(&self) -> Result<&str, Error> {
+        if !self.0.is_empty()
+            && self
+                .0
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        {
+            Ok(&self.0)
+        } else {
+            Err(Error::InvalidToken)
+        }
+    }
+}
+
 // We manually implement debug to protect against accidentally leaking the secret through debug printing.
 impl Debug for TokenSecret {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -141,9 +162,10 @@ impl IrmaClient {
 
     /// Get the status of a previously started irma session
     pub async fn status(&self, token: &SessionToken) -> Result<SessionStatus, Error> {
+        let token = token.validate()?;
         Ok(self
             .client
-            .get(self.url.join(&format!("session/{}/status", token.0))?)
+            .get(self.url.join(&format!("session/{token}/status"))?)
             .send()
             .await?
             .error_for_status()?
@@ -153,8 +175,9 @@ impl IrmaClient {
 
     /// Cancel a previously started session
     pub async fn cancel(&self, token: &SessionToken) -> Result<(), Error> {
+        let token = token.validate()?;
         self.client
-            .delete(self.url.join(&format!("session/{}", token.0))?)
+            .delete(self.url.join(&format!("session/{token}"))?)
             .send()
             .await?
             .error_for_status()?;
@@ -171,9 +194,10 @@ impl IrmaClient {
     /// can trust [`SessionResult::disclosed`] as soon as `result` returns `Ok`
     /// for a disclosure/signing session.
     pub async fn result(&self, token: &SessionToken) -> Result<SessionResult, Error> {
+        let token = token.validate()?;
         let result = self
             .client
-            .get(self.url.join(&format!("session/{}/result", token.0))?)
+            .get(self.url.join(&format!("session/{token}/result"))?)
             .send()
             .await?
             .error_for_status()?
@@ -282,6 +306,20 @@ mod tests {
     }
 
     #[test]
+    fn test_valid_tokens_pass_validation() {
+        for token in [
+            "KzxuWKwL5KGLKr4uerws",
+            "abcABC123",
+            "with-hyphen",
+            "with_underscore",
+            "a",
+        ] {
+            let session_token = SessionToken(token.to_string());
+            assert_eq!(session_token.validate().unwrap(), token);
+        }
+    }
+
+    #[test]
     fn non_valid_proof_on_finished_disclosure_is_rejected() {
         // A DONE session whose proof did not verify must not surface as Ok.
         for proof_status in [
@@ -347,6 +385,27 @@ mod tests {
             )),
             Err(Error::SessionNotFinished(SessionStatus::Connected))
         ));
+    }
+
+    #[test]
+    fn test_invalid_tokens_are_rejected() {
+        for token in [
+            "",              // empty
+            "../admin",      // path traversal
+            "..%2Fadmin",    // encoded traversal
+            "foo/bar",       // slash
+            "foo bar",       // whitespace
+            "token?query=1", // query injection
+            "token#frag",    // fragment injection
+            "tökén",         // non-ASCII
+            "a.b",           // dot
+        ] {
+            let session_token = SessionToken(token.to_string());
+            assert!(
+                matches!(session_token.validate(), Err(Error::InvalidToken)),
+                "expected {token:?} to be rejected"
+            );
+        }
     }
 
     #[test]
