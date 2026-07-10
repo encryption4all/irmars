@@ -44,5 +44,7 @@ async fn main() {
         sleep(Duration::from_secs(2)).await;
     };
 
+    // `client.result` only returns `Ok` once the signature proof has verified,
+    // so the disclosed attributes below can be trusted directly.
     println!("Session result: {:?}", result);
 }
