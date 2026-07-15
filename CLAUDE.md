@@ -1,6 +1,3 @@
-
----
-
 ## Agent notes (migrated from the dobby memory repo)
 
 ## Overview
