@@ -1,22 +1,51 @@
-## Agent notes (migrated from the dobby memory repo)
+# irmars
 
-## Overview
-`encryption4all/irmars` is a public Rust fork of `tweedegolf/irmars`, a client
-library for IRMA/Yivi disclosure, signing, and issuance sessions (`IrmaClient` in
-`src/irmaclient.rs`). This repo is ambiguous with an archived
-`privacybydesign/irmars`; always pass `--repo encryption4all/irmars` explicitly to
-`gh pr create` and other `gh` commands, or they can target the wrong repo. Default
-branch is `main`.
+A Rust wrapper around the IRMA/Yivi server REST API. `IrmaClient`
+(`src/irmaclient.rs`) starts and polls disclosure, signature and issuance
+sessions; the request and result types mirror the server's JSON. Published to
+crates.io as `irmars`, released by release-plz off Conventional Commits.
 
-## Security invariant: result() must enforce proof_status, not just session status
-`IrmaClient::result()` must reject results unless the proof is actually valid. A
-session with `status == Done` can still carry a `proof_status` of
-`Invalid`/`Expired`/`InvalidTimestamp`/`UnmatchedRequest`/`MissingAttributes`, and
-a consumer that only checks `Ok(result)` for `status == Done` will trust
-attributes from an invalid or expired proof. `result()` must enforce
-`proof_status == Some(ProofStatus::Valid)` both for Disclosing/Signing sessions
-and for Issuing sessions that carry an embedded disclosure component (detect via
-`proof_status.is_some() || !disclosed.is_empty()`); plain issuance with no
-disclosure component is fine gated on session completion alone. Use the shared
-`enforce_proof_valid` helper for this check rather than re-deriving it at each
-call site.
+**Interfaces may change.** The README warns that the library is still under
+development and its interfaces may not be stable. That warning still holds and
+is the first thing to know before building on the crate.
+
+## Position
+
+One company, two GitHub orgs. `privacybydesign` is the Yivi/IRMA lineage;
+`encryption4all` is the vehicle the PostGuard research project used to apply for
+grants, kept as an org after Yivi bought PostGuard to commercialise it. The
+split is historical, not organisational: same maintainers, same review
+conventions, and we are maintainers here, not upstream contributors.
+
+This crate is where the two sides meet. PostGuard authenticates an identity
+through a Yivi disclosure before its PKG hands out a decryption key, and this is
+the Rust client that runs that session.
+
+## Other repos to consider before changing this one
+
+- `privacybydesign/irmago` — the server this is a client of. Its session
+  endpoints and its `SessionResult`/`proofStatus` JSON are the contract these
+  types mirror, so a change there can invalidate them without touching this
+  repo. CI pins the server binary at a release tag (`.github/workflows/rust.yml`).
+- `encryption4all/postguard` — `pg-core`, `pg-pkg` and `pg-cli` depend on this
+  crate under a rename: `irma = { package = "irmars", version = "0.2.2" }`. The
+  coupling is a crates.io version pin, not the repo, so nothing landed here
+  reaches PostGuard until a release is published and that pin moves, security
+  fixes included.
+- `tweedegolf/irmars` — the upstream this repo forks from, dormant since 2021.
+  Not synced; do not expect changes to flow either way.
+- `privacybydesign/irmars` — an archived namesake, not this repo. Pass
+  `--repo encryption4all/irmars` to `gh` so a command cannot land on it.
+
+## What is not in this file
+
+Documentation belongs at `docs.postguard.eu/repos/irmars` (postguard-docs,
+`docs/repos/irmars.md`). A durable check belongs in the rule bundle the host
+lands in each container at `~/dobby-rules.md`, one rule per check. The crate's
+own invariants are documented where they are enforced: `src/lib.rs`'s module
+docs explain why a completed session is not a verified one, and unit tests in
+`src/irmaclient.rs` pin it.
+
+The agent notes this file used to be are in git history: 1,334 bytes at
+`e6fd5dd`, the last revision carrying them (`git show e6fd5dd:CLAUDE.md`).
+`tests/claude_md_orientation.rs` holds this file at orientation size.
