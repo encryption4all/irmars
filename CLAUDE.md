@@ -32,8 +32,9 @@ the Rust client that runs that session.
   coupling is a crates.io version pin, not the repo, so nothing landed here
   reaches PostGuard until a release is published and that pin moves, security
   fixes included.
-- `tweedegolf/irmars` — the upstream this repo forks from, dormant since 2021.
-  Not synced; do not expect changes to flow either way.
+- `tweedegolf/irmars` — the upstream this repo forks from; its `main` has not
+  moved since 2021, though a side branch saw one commit in 2023. Not synced; do
+  not expect changes to flow either way.
 - `privacybydesign/irmars` — an archived namesake, not this repo. Pass
   `--repo encryption4all/irmars` to `gh` so a command cannot land on it.
 

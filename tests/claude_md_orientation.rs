@@ -4,8 +4,10 @@
 use std::{fs, path::PathBuf};
 
 /// The host's threshold, not a cosmetic one: above 4,000 B a container working
-/// this repo stops getting its cwd pointed at the checkout
-/// (encryption4all/dobby-code#482). Raising it should be a decision.
+/// this repo stops getting its cwd pointed at the checkout — the `choose_cwd`
+/// gate in dobby-code's `docker/entrypoint.sh`
+/// (encryption4all/dobby-code#679, decided in #482). Raising it should be a
+/// decision.
 const MAX_BYTES: u64 = 4_000;
 
 #[test]
